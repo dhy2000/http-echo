@@ -4,8 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"github.com/gin-gonic/gin"
-	"io/ioutil"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -14,6 +13,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/gin-gonic/gin"
 )
 
 func GracefulExit(run func(), exit func()) {
@@ -37,25 +38,39 @@ func DisplayHeader(header http.Header) string {
 	return builder.String()
 }
 
+func Serve(server *http.Server, certFile string, keyFile string) error {
+	if len(certFile) == 0 || len(keyFile) == 0 {
+		log.Printf("Go visit: http://%v", server.Addr)
+		return server.ListenAndServe()
+	} else {
+		log.Printf("Go visit: https://%v", server.Addr)
+		return server.ListenAndServeTLS(certFile, keyFile)
+	}
+}
+
 func main() {
-	var port uint
-	flag.UintVar(&port, "p", 8000, "port to listen")
+	var address, name string
+	var cert, key string
+	flag.StringVar(&address, "a", "0.0.0.0:8000", "address to listen")
+	flag.StringVar(&name, "n", "HTTP-Echo", "name of this service")
+	flag.StringVar(&cert, "c", "", "path to cert file")
+	flag.StringVar(&key, "k", "", "path to key file")
 	flag.Parse()
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.Default()
 	router.Any("/*any", func(c *gin.Context) {
-		body, _ := ioutil.ReadAll(c.Request.Body)
-		response := fmt.Sprintf("Welcome to http-echo!\n[Client: %v]\n[Url: %v]\n[Method: %v]\n\n[Header]\n%s",
-			c.Request.RemoteAddr, c.Request.URL, c.Request.Method, DisplayHeader(c.Request.Header))
+		body, _ := io.ReadAll(c.Request.Body)
+		response := fmt.Sprintf("%v\n[Client: %v]\n[Url: %v]\n[Method: %v]\n\n[Header]\n%s",
+			name, c.Request.RemoteAddr, c.Request.URL, c.Request.Method, DisplayHeader(c.Request.Header))
 		if len(body) > 0 {
 			response += fmt.Sprintf("\n[Body]\n%v", string(body))
 		}
 		c.String(http.StatusOK, response)
 	})
-	server := &http.Server{Addr: fmt.Sprintf("0.0.0.0:%d", port), Handler: router}
+	server := &http.Server{Addr: address, Handler: router}
 	GracefulExit(func() {
-		log.Printf("Listening at port %d", port)
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		log.Printf("Welcome to %v, listening to %v", name, address)
+		if err := Serve(server, cert, key); err != nil && err != http.ErrServerClosed {
 			log.Fatalln(err)
 		}
 	}, func() {
